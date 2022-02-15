@@ -10,17 +10,22 @@ parser = argparse.ArgumentParser(description='Configure wacom tablets. Uses ~/.c
 parser.add_argument('-dbg', "--debug", action="store_true", help="Print debugging info. Limited and only useful for dev, if that.")
 parser.add_argument('--verbose', '-v', action='count', default=0)
 
+parser.add_argument("-l", "--list", action="store_true", help="List all devices with index for use with --device.")
+parser.add_argument('-d', "--device", type=str, action="store", help="Specify device, indexed from 0. Only needed if you have more than one. If omitted and there are multiple the first device found will be used.")
+
 parser.add_argument('-s', "--setup", action="store_true", help="Apply the current configuration from file. Otherwise detect tablets and create a config file with the current config. Will process all tablets unless --device is specified.")
 parser.add_argument('-m', "--monitor", type=str, nargs='?', const="None", help="Set which monitor to use. A number corresponding to the xrandr order, starts from 0. If no number it will cycle through the available monitors.")
 parser.add_argument('-b', "--button", type=str, nargs=2, action="append", help="Set what a button does.")
 parser.add_argument('-p', "--pressure-curve", type=str, nargs=4, action="store", help="Set the pressure curve.")
-parser.add_argument('-d', "--device", type=str, action="store", help="Specify device, indexed from 0. Only needed if you have more than one. If omitted and there are multiple the first device found will be used.")
+
 
 parser.add_argument("--save", action="store_true", help="Save the current config to the config file.")
 
-parser.add_argument("-l", "--list", action="store_true", help="List all devices with index for use with --device.")
 
-parser.add_argument('-a', "--aspect", type=str, nargs='?', const="None", help="Adjust the aspect ratio using either by limiting width or height (as on wacom page arch wiki). Takes one of: height, width (not as good), reset.")
+
+parser.add_argument('-a', "--aspect", type=str, help="Adjust the aspect ratio using either by limiting width or height (as on wacom page arch wiki). Takes one of: height, width (not as good), reset.")
+
+parser.add_argument('-r', "--rotate", type=str, help="Set rotation in 90 degree increments. Accepts one of: none, half, cw, ccw.")
 
 # TODO: Add option to adjust aspect ratio
 	# -a switch between height, width and none
@@ -39,6 +44,8 @@ parser.add_argument('-a', "--aspect", type=str, nargs='?', const="None", help="A
 
 
 args = parser.parse_args()
+
+
 
 def debug(msg):
 	if args.verbose > 0:
@@ -141,10 +148,18 @@ class Device:
 					self.pad = True
 
 	def applyConfig(self):
-		self.applyDisplay()
-		self.applyStylusButtons()
-		self.applyPadButtons()
-		self.saveTmp()
+		self.setDisplay()
+		
+		for button in  self.config["stylus buttons"]:
+			self.setStylusButtonDef(button, self.config["stylus buttons"][button])
+
+		if self.num_buttons > 0:
+			for button in self.config["buttons"]:
+				self.setPadButtonDef(button)
+
+		self.setAspect()
+		self.setPressureCurve()
+		self.setRotation()
 
 
 	def setup(self):
@@ -170,97 +185,12 @@ class Device:
 			self.config = self.defaultGen()
 
 
-	def applyDisplay(self):
+
+	def setDisplay(self):
 		index = int(self.config["monitor"]["monitor_index"])
 		cmd = "xsetwacom set {} MapToOutput {}".format(self.stylus_id, self.monitors[index])
 		debug(cmd)
 		run(cmd)
-
-
-	def applyStylusButtons(self):
-		key = self.config["stylus buttons"]["top"]
-		cmd = "xsetwacom set {} Button {} {}".format(self.stylus_id, self.stylus_top, key)
-		debug(cmd)
-		run(cmd)
-
-		key = self.config["stylus buttons"]["bot"]
-		cmd = "xsetwacom set {} Button {} {}".format(self.stylus_id, self.stylus_bot, key)
-		debug(cmd)
-		run(cmd)
-
-
-	def applyPadButtons(self):
-		if self.num_buttons > 0:
-			for button in self.config["buttons"]:
-				print(button)
-				but = ord(button) - 97
-				key = self.config["buttons"][button]
-				cmd = "xsetwacom set {} Button {} {}".format(self.pad_id, but, key)
-				debug(cmd)
-				# run(cmd)
-
-
-	def changePadButtonDef(self, button, kdef):
-		if self.num_buttons > 0:
-			self.config["buttons"][button.lower()] = kdef
-			cmd = "xsetwacom set {} Button {} {}".format(self.pad_id, ord(button.lower())-97, kdef)
-			debug(cmd)
-			# run(cmd)
-			self.saveTmp()
-
-
-	def changeStylusButtonDef(self, button, kdef):	
-		self.config["stylus buttons"][button] = kdef
-		cmd = "xsetwacom set {} Button {} {}".format(self.stylus_id, self.stylus_top, kdef)
-		debug(cmd)
-		run(cmd)
-		self.saveTmp()
-
-	def setAspect(self, typ):
-		cmd = "xsetwacom get {} Area".format(self.stylus_id)
-		r = runc(cmd)
-		x1, y1, tablet_width, tablet_height = [ int(x) for x in extract(r)[0].split() ]
-		print(r)
-		screen_height = 1080
-		screen_width = 1920
-
-		if typ == "height":
-			height = int(tablet_width * screen_height / screen_width)
-			cmd = f"xsetwacom set {self.stylus_id} Area 0 0 {tablet_width} {height}"
-			debug(cmd)
-			run(cmd)
-
-			cmd = "xsetwacom get {} Area".format(self.stylus_id)
-			r = runc(cmd)
-			print(r)
-
-			self.config["stylus"]["aspect_ratio"] = "height"
-
-		elif typ == "width":
-			# where WIDTH is screen_height * tablet_width / tablet_height
-			width = int(screen_height * tablet_width / tablet_height)
-			cmd = f"xsetwacom set {self.stylus_id} MapToOutput {width}x{screen_height}+0+0"
-			debug(cmd)
-			run(cmd)
-
-			self.config["stylus"]["aspect_ratio"] = "width"
-
-		elif typ == "reset":
-			cmd = f"xsetwacom set {self.stylus_id} ResetArea"
-			debug(cmd)
-			r = runc(cmd)
-			print(r)
-
-			index = int(self.config["monitor"]["monitor_index"])
-			cmd = "xsetwacom set {} MapToOutput {}".format(self.stylus_id, self.monitors[index])
-			debug(cmd)
-			run(cmd)
-
-			self.config["stylus"]["aspect_ratio"] = "reset"
-
-		self.saveTmp()
-
-
 
 	def switchDisplay(self, index=None):
 		if index == None:
@@ -271,16 +201,110 @@ class Device:
 		elif index >= self.num_monitors:
 			index = self.num_monitors - 1
 
-		cmd = "xsetwacom set {} MapToOutput {}".format(self.stylus_id, self.monitors[index])
-		debug(cmd)
-
 		self.config["monitor"]["monitor_index"] = str(index)
-		self.saveTmp()		
+
+		self.setDisplay()
+
+		
+
+
+
+	def setStylusButtonDef(self, button, kdef):
+		if button == "top":
+			button = 2
+		elif button == "mid":
+			button = 2
+		elif button == "bot":
+			button = 3
+
+		cmd = "xsetwacom set {} Button {} {}".format(self.stylus_id, button, kdef)
+		debug(cmd)
+		run(cmd)
+
+	def changeStylusButtonDef(self, button, kdef):
+		self.config["stylus buttons"][button] = kdef
+		self.setStylusButtonDef(button)
+
+
+
+	def setPadButtonDef(self, button):
+		if self.num_buttons > 0:
+			kdef = self.config["buttons"][button]
+			cmd = "xsetwacom set {} Button {} {}".format(self.pad_id, ord(button)-97, kdef)
+			debug(cmd)
+			# run(cmd)
+
+	def changePadButtonDef(self, button, kdef):
+		if self.num_buttons > 0:
+			self.config["buttons"][button] = kdef
+			self.setPadButtonDef(button)
+
+
+
+	def setAspect(self):
+		cmd = "xsetwacom get {} Area".format(self.stylus_id)
+		r = runc(cmd)
+		x1, y1, tablet_width, tablet_height = [ int(x) for x in extract(r)[0].split() ]
+		print(r)
+		screen_height = 1080
+		screen_width = 1920
+
+		if self.config["stylus"]["aspect_ratio"] == "height":
+			height = int(tablet_width * screen_height / screen_width)
+			cmd = f"xsetwacom set {self.stylus_id} Area 0 0 {tablet_width} {height}"
+			debug(cmd)
+			run(cmd)
+
+			cmd = "xsetwacom get {} Area".format(self.stylus_id)
+			r = runc(cmd)
+			print(r)
+
+
+		elif self.config["stylus"]["aspect_ratio"] == "width":
+			width = int(screen_height * tablet_width / tablet_height)
+			cmd = f"xsetwacom set {self.stylus_id} MapToOutput {width}x{screen_height}+0+0"
+			debug(cmd)
+			run(cmd)
+
+		elif self.config["stylus"]["aspect_ratio"] == "reset":
+			cmd = f"xsetwacom set {self.stylus_id} ResetArea"
+			debug(cmd)
+			r = runc(cmd)
+			print(r)
+
+			index = int(self.config["monitor"]["monitor_index"])
+			cmd = "xsetwacom set {} MapToOutput {}".format(self.stylus_id, self.monitors[index])
+			debug(cmd)
+			run(cmd)
+
+
+	def changeAspect(self, typ):
+		self.config["stylus"]["aspect_ratio"] = typ
+		self.setAspect()
+
+
+
+	def setPressureCurve(self):
+		pc = self.config["stylus"]["pressure_curve"]
+		cmd = "xsetwacom set {} PressureCurve {}".format(self.stylus_id, pc)
+		debug(cmd)
+		run(cmd)
 
 	def changePressureCurve(self, curve):
 		self.config["stylus"]["pressure_curve"] = pc
-		cmd = "xsetwacom set {} PressureCurve {}".format(self.stylus_id, pc)
-		self.saveTmp()
+		self.setPressureCurve()
+
+
+	def setRotation(self):
+		value = self.config["stylus"]["rotation"]
+		cmd = f"xsetwacom set {self.stylus_id} rotate {value}"
+		debug(cmd)
+		run(cmd)
+
+	def changeRotation(self, value):
+		self.config["stylus"]["rotation"] = value
+		self.setRotation()
+
 
 
 	def unTmp(self):
@@ -301,7 +325,8 @@ class Device:
 
 		default["stylus"] = {
 			"pressure_curve": pc,
-			"aspect_ratio": "reset"
+			"aspect_ratio": "reset",
+			"rotation": "none"
 		}
 
 		cmd = "xsetwacom get {} Button 2".format(self.stylus_id)
@@ -376,10 +401,12 @@ if args.setup:
 		device = int(args.device)
 		print(f"Device detected:  {device.pretty_str}")
 		device.setup()
+		device.saveTmp()
 	else:
 		for device in devices:
 			print(f"Device detected:  {device.pretty_str}")
 			device.setup()
+			device.saveTmp()
 
 	exit()
 
@@ -393,31 +420,37 @@ if args.button:
 			device.changePadButtonDef(button, kdef)
 		else:
 			print("Button {} not recognised".format(button))
+	device.saveTmp()
 
 	
 elif args.monitor == "None":	
 	device.readConfig()
 	device.switchDisplay()
+	device.saveTmp()
 
 
 elif args.monitor:
 	device.readConfig()
 	device.switchDisplay(int(args.monitor))
-
+	device.saveTmp()
 
 if args.pressure_curve:
 	device.readConfig()
 	pc = " ".join(args.pressure_curve)
 	device.changePressureCurve(pc)
-
+	device.saveTmp()
 
 
 if args.aspect:
 	device.readConfig()
 	device.setAspect(args.aspect)
+	device.saveTmp()
 
 
-
+if args.rotate:
+	device.readConfig()
+	device.changeRotation(args.rotate)
+	device.saveTmp()
 
 
 
