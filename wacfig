@@ -11,9 +11,10 @@ parser.add_argument('-dbg', "--debug", action="store_true", help="Print debuggin
 parser.add_argument('--verbose', '-v', action='count', default=0)
 
 parser.add_argument('-s', "--setup", action="store_true", help="Use the config file ~/.config/wacom-config/wacom.conf to set up the env. Add to your startup programs or .bashrc etc.")
-parser.add_argument('-d', "--display", type=str, nargs='?', const="None", help="Set which display to use. A number corresponding to the xrandr order, starts from 0. If no number it will cycle through the available monitors.")
+parser.add_argument('-m', "--monitor", type=str, nargs='?', const="None", help="Set which monitor to use. A number corresponding to the xrandr order, starts from 0. If no number it will cycle through the available monitors.")
 parser.add_argument('-b', "--button", type=str, nargs=2, action="append", help="Set what a button does.")
-
+parser.add_argument('-p', "--pressure-curve", type=str, nargs=4, action="store", help="Set the pressure curve. If multiple devices need to specify with -d.")
+parser.add_argument('-d', "--device", type=str, nargs=1, action="store", help="Specify device. Only needed if you have more than one. If omitted and there are multiple it will choose the first.")
 
 
 # TODO: Add option to save current config to config file
@@ -285,6 +286,15 @@ if len(devices) == 0:
 	exit()
 
 
+if args.device:
+	if args.device.isdigit():
+		device = devices[int(args.device)]
+	else:
+		pass
+		# Name, model num?
+else:
+	device = devices[0]
+
 
 if args.setup:
 	for device in devices:
@@ -292,26 +302,24 @@ if args.setup:
 		device.setup()
 
 elif args.button:
-	# If len(devices) > 1 require a flag or ask which one
-	devices[0].readConfig()
+	# If len(devices) > 1 require a flag or ask which one	
+	device.readConfig()
 	for button, kdef in args.button:
 		if button == "top" or button == "bot":
-			devices[0].changeStylusButtonDef(button, kdef)
+			device.changeStylusButtonDef(button, kdef)
 		elif button in devices[0].button_list:
-			devices[0].changePadButtonDef(button, kdef)
+			device.changePadButtonDef(button, kdef)
 		else:
 			print("Button {} not recognised".format(button))
 
 	
-elif args.display == "None":
-	for device in devices:
-		device.readConfig()
-		device.switchDisplay()
+elif args.monitor == "None":	
+	device.readConfig()
+	device.switchDisplay()
 
 
-elif not args.display == "None":
-	for device in devices:
-		device.readConfig()
-		device.switchDisplay(int(args.display))
+elif not args.monitor == "None":
+	device.readConfig()
+	device.switchDisplay(int(args.monitor))
 
 
