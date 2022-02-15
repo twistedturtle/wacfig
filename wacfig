@@ -10,7 +10,7 @@ parser = argparse.ArgumentParser(description='Configure wacom tablets. Uses ~/.c
 parser.add_argument('-dbg', "--debug", action="store_true", help="Print debugging info. Limited and only useful for dev, if that.")
 parser.add_argument('--verbose', '-v', action='count', default=0)
 
-parser.add_argument('-s', "--setup", action="store_true", help="Detect tablets and create a config file with the current config. Will process all tablets unless --device is specified.")
+parser.add_argument('-s', "--setup", action="store_true", help="Apply the current configuration from file. Otherwise detect tablets and create a config file with the current config. Will process all tablets unless --device is specified.")
 parser.add_argument('-m', "--monitor", type=str, nargs='?', const="None", help="Set which monitor to use. A number corresponding to the xrandr order, starts from 0. If no number it will cycle through the available monitors.")
 parser.add_argument('-b', "--button", type=str, nargs=2, action="append", help="Set what a button does.")
 parser.add_argument('-p', "--pressure-curve", type=str, nargs=4, action="store", help="Set the pressure curve.")
@@ -219,7 +219,7 @@ class Device:
 		self.saveTmp()		
 
 
-	def untmp(self):
+	def unTmp(self):
 		cmd = "cp {} {}/{}.conf".format(self.tmp_path, self.conf_path.parent, self.name)
 		debug(cmd)
 		run(cmd)
