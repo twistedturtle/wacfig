@@ -1,0 +1,302 @@
+#!/usr/bin/python
+
+import argparse, subprocess, os, sys, re, configparser
+from pathlib import Path
+
+
+parser = argparse.ArgumentParser(description='Configure wacom tablets. Uses ~/.config/wacon-config.')
+
+# Flags
+parser.add_argument('-dbg', "--debug", action="store_true", help="Print debugging info. Limited and only useful for dev, if that.")
+parser.add_argument('--verbose', '-v', action='count', default=0)
+
+parser.add_argument('-s', "--setup", action="store_true", help="Use the config file ~/.config/wacom-config/wacom.conf to set up the env. Add to your startup programs or .bashrc etc.")
+parser.add_argument('-d', "--display", type=str, nargs='?', const="None", help="Set which display to use. A number corresponding to the xrandr order, starts from 0. If no number it will cycle through the available monitors.")
+parser.add_argument('-b', "--button", type=str, nargs=2, action="append", help="Set what a button does.")
+
+
+
+# TODO: Add option to save current config to config file
+# TODO: Add option to set pressure curve
+# TODO: Add option to adjust aspect ratio
+
+args = parser.parse_args()
+
+def debug(msg):
+	if args.verbose > 0:
+		print(msg)
+
+
+def run(cmd):
+	return subprocess.run(cmd, shell=True)
+
+
+def runc(cmd):
+	return subprocess.run(cmd, capture_output=True, shell=True)
+
+def extract(r):
+	l = str(r.stdout).strip("b'").split("\\n")
+	if args.debug:
+		print(l)
+	while "" in l:
+		l.remove("")
+	return l
+
+
+
+class Device:
+	def __init__(self, filename):
+
+		self.filename = filename
+		self.details = configparser.ConfigParser()
+		self.details.read(filename)
+
+		self.stylus_top = 2 			# Button numbers
+		self.stylus_bot = 3
+
+		cmd = "xrandr | awk '$2 == \"connected\" {print $1}'"
+		r = runc(cmd)
+		self.monitors = extract(r)
+		self.num_monitors = len(self.monitors)
+
+		self.num_buttons = self.details.getint("Features", "Buttons")
+		self.num_trips   = self.details.getint("Features", "NumStrips")
+
+		self.has_stylus = self.details.getboolean("Features", "Stylus")
+		self.has_touch  = self.details.getboolean("Features", "Touch")
+		self.has_ring   = self.details.getboolean("Features", "Ring")
+
+		self.name = self.details["Device"]["Name"]
+		self.modelname = self.details["Device"]["ModelName"]
+
+		self.pretty_str = "{}   {}   pad_buttons: {}".format(self.name, self. modelname, self.num_buttons)
+
+		self.conf_path = Path.home() / f".config/wacfig/{self.name}.conf"
+		self.conf_path.parent.mkdir(parents=True, exist_ok=True)
+
+		UID = os.getuid()
+		self.tmp_path = Path(f"/run/user/{UID}/wacfig/{self.name}.tmp")
+		self.tmp_path.parent.mkdir(parents=True, exist_ok=True)
+
+		if self.num_buttons > 0:
+			self.pad = True
+			self.button_list = [ chr(i+97) for i in range(self.num_buttons)]
+		else:
+			self.pad = False
+
+
+	def print(self):
+		print(self.pretty_str)
+		print(self.stylus_id)
+		print(self.eraser_id)
+
+	def saveConfig(self):
+		with open(self.conf_path, "w") as conf_file:
+			self.config.write(conf_file)
+
+	def saveTmp(self):
+		with open(self.tmp_path, "w") as tmp_file:
+			self.config.write(tmp_file)
+
+	def getIDs(self):
+		cmd = "xsetwacom list devices"
+		r = runc(cmd)
+		li_dev = extract(r)
+
+		pat_stylus = re.compile("STYLUS")
+		pat_eraser = re.compile("ERASER")
+		pat_pad = re.compile("PAD")
+		pat_id = re.compile("id: ([0-9]+)")
+
+		for line in li_dev:
+			if pat_stylus.search(line):
+				if imatch := pat_id.search(line):
+					self.stylus_id = imatch.groups()[0]
+
+			elif pat_eraser.search(line):
+				if imatch := pat_id.search(line):
+					self.eraser_id = imatch.groups()[0]
+
+			elif pat_pad.search(line):
+				if imatch := pat_id.search(line):
+					dselfpad_id = imatch.groups()[0]
+					self.pad = True
+
+	def applyConfig(self):
+		self.applyDisplay()
+		self.applyStylusButtons()
+		self.applyPadButtons()
+		self.saveTmp()
+
+
+	def setup(self):
+		if self.conf_path.is_file():
+			debug("Reading config")
+			self.config = configparser.ConfigParser()
+			self.config.read(self.conf_path)
+		else:
+			debug("Creating default config")
+			self.config = self.defaultGen()
+
+		self.applyConfig()
+			
+
+	def readConfig(self):
+		self.config = configparser.ConfigParser()
+
+		if self.tmp_path.is_file():
+			self.config.read(self.tmp_path)
+		elif self.conf_path.is_file():
+			self.config.read(self.conf_path)
+		else:
+			self.config = self.defaultGen()
+
+
+	def applyDisplay(self):
+		index = int(self.config["monitor"]["monitor_index"])
+		cmd = "xsetwacom set {} MapToOutput {}".format(self.stylus_id, self.monitors[index])
+		debug(cmd)
+		run(cmd)
+
+
+	def applyStylusButtons(self):
+		key = self.config["stylus buttons"]["top"]
+		cmd = "xsetwacom set {} Button {} {}".format(self.stylus_id, self.stylus_top, key)
+		debug(cmd)
+		run(cmd)
+
+		key = self.config["stylus buttons"]["bot"]
+		cmd = "xsetwacom set {} Button {} {}".format(self.stylus_id, self.stylus_bot, key)
+		debug(cmd)
+		run(cmd)
+
+
+	def applyPadButtons(self):
+		if self.num_buttons > 0:
+			for button in self.config["buttons"]:
+				print(button)
+				but = ord(button) - 97
+				key = self.config["buttons"][button]
+				cmd = "xsetwacom set {} Button {} {}".format(self.pad_id, but, key)
+				debug(cmd)
+				# run(cmd)
+
+
+	def changePadButtonDef(self, button, kdef):
+		if self.num_buttons > 0:
+			self.config["buttons"][button.lower()] = kdef
+			cmd = "xsetwacom set {} Button {} {}".format(self.pad_id, ord(button.lower())-97, kdef)
+			debug(cmd)
+			# run(cmd)
+			self.saveTmp()
+
+
+	def changeStylusButtonDef(self, button, kdef):	
+		self.config["stylus buttons"][button] = kdef
+		cmd = "xsetwacom set {} Button {} {}".format(self.stylus_id, self.stylus_top, kdef)
+		debug(cmd)
+		run(cmd)
+		self.saveTmp()
+
+
+	def switchDisplay(self, index=None):
+		if index == None:
+			index = int(self.config["monitor"]["monitor_index"])
+			index += 1
+			if index >= self.num_monitors:
+				index = 0
+		elif index >= self.num_monitors:
+			index = self.num_monitors - 1
+
+		cmd = "xsetwacom set {} MapToOutput {}".format(self.stylus_id, self.monitors[index])
+		debug(cmd)
+
+		self.config["monitor"]["monitor_index"] = str(index)
+		self.saveTmp()		
+
+
+	def untmp(self):
+		cmd = "cp {} {}/{}.conf".format(self.tmp_path, self.conf_path.parent, self.name)
+		debug(cmd)
+		run(cmd)
+
+	def defaultGen(self):
+		default = configparser.ConfigParser()
+		default["monitor"] = {
+			"monitor_index": 0
+		}
+
+		# Get default pressure curve using xsetwacom
+		default["stylus"] = {
+			"pressure_curve_stuff": "TBA"
+		}
+
+		default["stylus buttons"] = {
+			"top": "2",
+			"bot": "3"  # right mouse button
+		}
+
+		if self.num_buttons > 0:
+			default["buttons"] = {}
+			for i in range(self.num_buttons):
+				default["buttons"][chr(i+97)] = f"{i}"
+
+		with open(self.conf_path, "w") as fp:
+			default.write(fp)
+
+		return default
+
+
+config_dir = Path().home() / ".config/wacom-config"
+
+cmd = "lsusb | grep -i wacom | awk '{print $6}'"
+r = runc(cmd)
+devices_lsusb = extract(r)
+
+devices = []
+for dev in devices_lsusb:
+	cmd = "grep -rni \"{}\" /usr/share/libwacom/* | sed 's/:.*:.*//'".format(dev)
+	r = runc(cmd)
+	filename = extract(r)
+
+	d = Device(filename)
+	d.getIDs()
+	devices.append(d)
+
+
+# If no device then exit
+if len(devices) == 0:
+	print("No device found...")
+	exit()
+
+
+
+if args.setup:
+	for device in devices:
+		print(f"Device detected:  {device.pretty_str}")
+		device.setup()
+
+elif args.button:
+	# If len(devices) > 1 require a flag or ask which one
+	devices[0].readConfig()
+	for button, kdef in args.button:
+		if button == "top" or button == "bot":
+			devices[0].changeStylusButtonDef(button, kdef)
+		elif button in devices[0].button_list:
+			devices[0].changePadButtonDef(button, kdef)
+		else:
+			print("Button {} not recognised".format(button))
+
+	
+elif args.display == "None":
+	for device in devices:
+		device.readConfig()
+		device.switchDisplay()
+
+
+elif not args.display == "None":
+	for device in devices:
+		device.readConfig()
+		device.switchDisplay(int(args.display))
+
+
