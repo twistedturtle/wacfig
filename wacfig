@@ -27,20 +27,11 @@ parser.add_argument('-a', "--aspect", type=str, help="Adjust the aspect ratio us
 
 parser.add_argument('-r', "--rotate", type=str, help="Set rotation in 90 degree increments. Accepts one of: none, half, cw, ccw.")
 
-# TODO: Add option to adjust aspect ratio
-	# -a switch between height, width and none
-	
-	# -a width
-	# -a height
-	
-	# -a width  
-	# -a height
-	
-	# -a reset/none
+
 
 # TODO: Figure out a way to specify devices, name/modelname
 # TODO: Add option show more info?
-# TODO: Add option to rotate
+
 
 
 args = parser.parse_args()
@@ -443,7 +434,7 @@ if args.pressure_curve:
 
 if args.aspect:
 	device.readConfig()
-	device.setAspect(args.aspect)
+	device.changeAspect(args.aspect)
 	device.saveTmp()
 
 
