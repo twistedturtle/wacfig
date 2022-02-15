@@ -14,17 +14,29 @@ parser.add_argument('-s', "--setup", action="store_true", help="Apply the curren
 parser.add_argument('-m', "--monitor", type=str, nargs='?', const="None", help="Set which monitor to use. A number corresponding to the xrandr order, starts from 0. If no number it will cycle through the available monitors.")
 parser.add_argument('-b', "--button", type=str, nargs=2, action="append", help="Set what a button does.")
 parser.add_argument('-p', "--pressure-curve", type=str, nargs=4, action="store", help="Set the pressure curve.")
-parser.add_argument('-d', "--device", type=str, nargs=1, action="store", help="Specify device, indexed from 0. Only needed if you have more than one. If omitted and there are multiple the first device found will be used.")
+parser.add_argument('-d', "--device", type=str, action="store", help="Specify device, indexed from 0. Only needed if you have more than one. If omitted and there are multiple the first device found will be used.")
 
 parser.add_argument("--save", action="store_true", help="Save the current config to the config file.")
 
 parser.add_argument("-l", "--list", action="store_true", help="List all devices with index for use with --device.")
 
+parser.add_argument('-a', "--aspect", type=str, nargs='?', const="None", help="Adjust the aspect ratio using either by limiting width or height (as on wacom page arch wiki). Takes one of: height, width (not as good), reset.")
 
-# TODO: Add option to set pressure curve
 # TODO: Add option to adjust aspect ratio
+	# -a switch between height, width and none
+	
+	# -a width
+	# -a height
+	
+	# -a width  
+	# -a height
+	
+	# -a reset/none
+
 # TODO: Figure out a way to specify devices, name/modelname
-# TODO: Add option to list devices with index
+# TODO: Add option show more info?
+# TODO: Add option to rotate
+
 
 args = parser.parse_args()
 
@@ -204,6 +216,51 @@ class Device:
 		run(cmd)
 		self.saveTmp()
 
+	def setAspect(self, typ):
+		cmd = "xsetwacom get {} Area".format(self.stylus_id)
+		r = runc(cmd)
+		x1, y1, tablet_width, tablet_height = [ int(x) for x in extract(r)[0].split() ]
+		print(r)
+		screen_height = 1080
+		screen_width = 1920
+
+		if typ == "height":
+			height = int(tablet_width * screen_height / screen_width)
+			cmd = f"xsetwacom set {self.stylus_id} Area 0 0 {tablet_width} {height}"
+			debug(cmd)
+			run(cmd)
+
+			cmd = "xsetwacom get {} Area".format(self.stylus_id)
+			r = runc(cmd)
+			print(r)
+
+			self.config["stylus"]["aspect_ratio"] = "height"
+
+		elif typ == "width":
+			# where WIDTH is screen_height * tablet_width / tablet_height
+			width = int(screen_height * tablet_width / tablet_height)
+			cmd = f"xsetwacom set {self.stylus_id} MapToOutput {width}x{screen_height}+0+0"
+			debug(cmd)
+			run(cmd)
+
+			self.config["stylus"]["aspect_ratio"] = "width"
+
+		elif typ == "reset":
+			cmd = f"xsetwacom set {self.stylus_id} ResetArea"
+			debug(cmd)
+			r = runc(cmd)
+			print(r)
+
+			index = int(self.config["monitor"]["monitor_index"])
+			cmd = "xsetwacom set {} MapToOutput {}".format(self.stylus_id, self.monitors[index])
+			debug(cmd)
+			run(cmd)
+
+			self.config["stylus"]["aspect_ratio"] = "reset"
+
+		self.saveTmp()
+
+
 
 	def switchDisplay(self, index=None):
 		if index == None:
@@ -243,7 +300,8 @@ class Device:
 		pc = extract(r)[0]
 
 		default["stylus"] = {
-			"pressure_curve": pc
+			"pressure_curve": pc,
+			"aspect_ratio": "reset"
 		}
 
 		cmd = "xsetwacom get {} Button 2".format(self.stylus_id)
@@ -351,6 +409,17 @@ if args.pressure_curve:
 	device.readConfig()
 	pc = " ".join(args.pressure_curve)
 	device.changePressureCurve(pc)
+
+
+
+if args.aspect:
+	device.readConfig()
+	device.setAspect(args.aspect)
+
+
+
+
+
 
 
 if args.save:
