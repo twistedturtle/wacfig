@@ -10,16 +10,19 @@ parser = argparse.ArgumentParser(description='Configure wacom tablets. Uses ~/.c
 parser.add_argument('-dbg', "--debug", action="store_true", help="Print debugging info. Limited and only useful for dev, if that.")
 parser.add_argument('--verbose', '-v', action='count', default=0)
 
-parser.add_argument('-s', "--setup", action="store_true", help="Use the config file ~/.config/wacom-config/wacom.conf to set up the env. Add to your startup programs or .bashrc etc.")
+parser.add_argument('-s', "--setup", action="store_true", help="Detect tablets and create a config file with the current config. Will process all tablets unless --device is specified.")
 parser.add_argument('-m', "--monitor", type=str, nargs='?', const="None", help="Set which monitor to use. A number corresponding to the xrandr order, starts from 0. If no number it will cycle through the available monitors.")
 parser.add_argument('-b', "--button", type=str, nargs=2, action="append", help="Set what a button does.")
-parser.add_argument('-p', "--pressure-curve", type=str, nargs=4, action="store", help="Set the pressure curve. If multiple devices need to specify with -d.")
-parser.add_argument('-d', "--device", type=str, nargs=1, action="store", help="Specify device. Only needed if you have more than one. If omitted and there are multiple it will choose the first.")
+parser.add_argument('-p', "--pressure-curve", type=str, nargs=4, action="store", help="Set the pressure curve.")
+parser.add_argument('-d', "--device", type=str, nargs=1, action="store", help="Specify device, indexed from 0. Only needed if you have more than one. If omitted and there are multiple the first device found will be used.")
 
+parser.add_argument("--save", action="store_true", help="Save the current config to the config file.")
 
 # TODO: Add option to save current config to config file
 # TODO: Add option to set pressure curve
 # TODO: Add option to adjust aspect ratio
+# TODO: Figure out a way to specify devices, name/modelname
+# TODO: Add option to list devices with index
 
 args = parser.parse_args()
 
@@ -297,9 +300,14 @@ else:
 
 
 if args.setup:
-	for device in devices:
+	if args.device:
+		device = int(args.device)
 		print(f"Device detected:  {device.pretty_str}")
 		device.setup()
+	else:
+		for device in devices:
+			print(f"Device detected:  {device.pretty_str}")
+			device.setup()
 
 elif args.button:
 	# If len(devices) > 1 require a flag or ask which one	
@@ -323,3 +331,5 @@ elif not args.monitor == "None":
 	device.switchDisplay(int(args.monitor))
 
 
+if args.save:
+	device.unTmp()
