@@ -18,7 +18,7 @@ parser.add_argument('-d', "--device", type=str, nargs=1, action="store", help="S
 
 parser.add_argument("--save", action="store_true", help="Save the current config to the config file.")
 
-# TODO: Add option to save current config to config file
+
 # TODO: Add option to set pressure curve
 # TODO: Add option to adjust aspect ratio
 # TODO: Figure out a way to specify devices, name/modelname
@@ -218,6 +218,11 @@ class Device:
 		self.config["monitor"]["monitor_index"] = str(index)
 		self.saveTmp()		
 
+	def changePressureCurve(self, curve):
+		self.config["stylus"]["pressure_curve"] = pc
+		cmd = "xsetwacom set {} PressureCurve {}".format(self.stylus_id, pc)
+		self.saveTmp()
+
 
 	def unTmp(self):
 		cmd = "cp {} {}/{}.conf".format(self.tmp_path, self.conf_path.parent, self.name)
@@ -309,7 +314,9 @@ if args.setup:
 			print(f"Device detected:  {device.pretty_str}")
 			device.setup()
 
-elif args.button:
+	exit()
+
+if args.button:
 	# If len(devices) > 1 require a flag or ask which one	
 	device.readConfig()
 	for button, kdef in args.button:
@@ -326,9 +333,15 @@ elif args.monitor == "None":
 	device.switchDisplay()
 
 
-elif not args.monitor == "None":
+elif args.monitor:
 	device.readConfig()
 	device.switchDisplay(int(args.monitor))
+
+
+if args.pressure_curve:
+	device.readConfig()
+	pc = " ".join(args.pressure_curve)
+	device.changePressureCurve(pc)
 
 
 if args.save:
