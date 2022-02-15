@@ -227,19 +227,34 @@ class Device:
 		}
 
 		# Get default pressure curve using xsetwacom
+		cmd = "xsetwacom get {} PressureCurve ".format(self.stylus_id)
+		r = runc(cmd)
+		pc = extract(r)[0]
+
 		default["stylus"] = {
-			"pressure_curve_stuff": "TBA"
+			"pressure_curve": pc
 		}
 
+		cmd = "xsetwacom get {} Button 2".format(self.stylus_id)
+		r = runc(cmd)
+		top = extract(r)[0][7:]
+
+		cmd = "xsetwacom get {} Button 3".format(self.stylus_id)
+		r = runc(cmd)
+		bot = extract(r)[0][7:]
+
 		default["stylus buttons"] = {
-			"top": "2",
-			"bot": "3"  # right mouse button
+			"top": top,
+			"bot": bot
 		}
 
 		if self.num_buttons > 0:
 			default["buttons"] = {}
 			for i in range(self.num_buttons):
-				default["buttons"][chr(i+97)] = f"{i}"
+				cmd = "xsetwacom get {} Button {}".format(self.pad_id, i)
+				r = runc(cmd)
+				kdef = extract()[0][7:]
+				default["buttons"][chr(i+97)] = kdef
 
 		with open(self.conf_path, "w") as fp:
 			default.write(fp)
