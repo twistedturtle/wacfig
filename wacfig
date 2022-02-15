@@ -18,6 +18,8 @@ parser.add_argument('-d', "--device", type=str, nargs=1, action="store", help="S
 
 parser.add_argument("--save", action="store_true", help="Save the current config to the config file.")
 
+parser.add_argument("-l", "--list", action="store_true", help="List all devices with index for use with --device.")
+
 
 # TODO: Add option to set pressure curve
 # TODO: Add option to adjust aspect ratio
@@ -291,6 +293,13 @@ for dev in devices_lsusb:
 # If no device then exit
 if len(devices) == 0:
 	print("No device found...")
+	exit()
+
+
+if args.list:
+	print("Index\tName\t\tModel\t\tPad Buttons\n-----\t----\t\t-----\t\t-----------")
+	for i in range(len(devices)):
+		print(f"{i}\t{devices[i].name}\t{devices[i].modelname}\t\t{devices[i].num_buttons}")
 	exit()
 
 
