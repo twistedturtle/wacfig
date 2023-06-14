@@ -1,10 +1,11 @@
 #!/usr/bin/python
 
-import argparse, subprocess, os, sys, re, configparser
+import argparse, subprocess, os, sys, re
+import configparser as cfp
 from pathlib import Path
 
 
-parser = argparse.ArgumentParser(description='Configure wacom tablets. Uses ~/.config/wacon-config.')
+parser = argparse.ArgumentParser(description='Configure wacom graphics tablets. Uses ~/.config/wacfig to store config files for each tablet.')
 
 # Flags
 parser.add_argument('-dbg', "--debug", action="store_true", help="Print debugging info. Limited and only useful for dev, if that.")
@@ -32,15 +33,20 @@ parser.add_argument('-r', "--rotate", type=str, help="Set rotation in 90 degree 
 # TODO: Figure out a way to specify devices, name/modelname
 # TODO: Add option show more info?
 
-
-
 args = parser.parse_args()
 
 
 
 def debug(msg):
-	if args.verbose > 0:
+	if args.debug:
 		print(msg)
+
+def debugConfig(config: cfp.ConfigParser):
+	if args.debug:
+		print(config.sections())
+		for section in config.sections():
+			for key in config[section]:
+				print(f"{section} {key} {config[section][key]}")
 
 
 def run(cmd):
@@ -64,19 +70,30 @@ class Device:
 	def __init__(self, filename):
 
 		self.filename = filename
-		self.details = configparser.ConfigParser()
+		self.details = cfp.ConfigParser()
 		self.details.read(filename)
+
+		debugConfig(self.details)
+
 
 		self.stylus_top = 2 			# Button numbers
 		self.stylus_bot = 3
 
+		# num monitors will be the same for all devices
+		# should move this out
 		cmd = "xrandr | awk '$2 == \"connected\" {print $1}'"
 		r = runc(cmd)
 		self.monitors = extract(r)
 		self.num_monitors = len(self.monitors)
 
+		cmd = "xrandr | grep 'Screen 0:' | awk '{print $8,$10}'"
+		r = runc(cmd)
+		self.screen_width, self.screen_height = extract(r)[0].strip(",").split()
+		self.screen = f"{self.screen_width}x{self.screen_height}+0+0"
+		print(self.screen)
+
 		self.num_buttons = self.details.getint("Features", "Buttons")
-		self.num_trips   = self.details.getint("Features", "NumStrips")
+		self.num_strips   = self.details.getint("Features", "NumStrips")
 
 		self.has_stylus = self.details.getboolean("Features", "Stylus")
 		self.has_touch  = self.details.getboolean("Features", "Touch")
@@ -100,6 +117,8 @@ class Device:
 		else:
 			self.pad = False
 
+		self.getIDs()
+		self.cmd = f"xsetwacom set {self.stylus_id} "
 
 	def print(self):
 		print(self.pretty_str)
@@ -117,14 +136,14 @@ class Device:
 	def getIDs(self):
 		cmd = "xsetwacom list devices"
 		r = runc(cmd)
-		li_dev = extract(r)
+		device_list = extract(r)
 
 		pat_stylus = re.compile("STYLUS")
 		pat_eraser = re.compile("ERASER")
 		pat_pad = re.compile("PAD")
 		pat_id = re.compile("id: ([0-9]+)")
 
-		for line in li_dev:
+		for line in device_list:
 			if pat_stylus.search(line):
 				if imatch := pat_id.search(line):
 					self.stylus_id = imatch.groups()[0]
@@ -135,14 +154,14 @@ class Device:
 
 			elif pat_pad.search(line):
 				if imatch := pat_id.search(line):
-					dselfpad_id = imatch.groups()[0]
+					self.pad_id = imatch.groups()[0]
 					self.pad = True
 
 	def applyConfig(self):
 		self.setDisplay()
-		
-		for button in  self.config["stylus buttons"]:
-			self.setStylusButtonDef(button, self.config["stylus buttons"][button])
+
+		for button in self.config["stylus buttons"]:
+			self.setStylusButtonDef(button)
 
 		if self.num_buttons > 0:
 			for button in self.config["buttons"]:
@@ -156,17 +175,17 @@ class Device:
 	def setup(self):
 		if self.conf_path.is_file():
 			debug("Reading config")
-			self.config = configparser.ConfigParser()
+			self.config = cfp.ConfigParser()
 			self.config.read(self.conf_path)
 		else:
 			debug("Creating default config")
 			self.config = self.defaultGen()
 
 		self.applyConfig()
-			
+
 
 	def readConfig(self):
-		self.config = configparser.ConfigParser()
+		self.config = cfp.ConfigParser()
 
 		if self.tmp_path.is_file():
 			self.config.read(self.tmp_path)
@@ -176,31 +195,38 @@ class Device:
 			self.config = self.defaultGen()
 
 
-
+	# TODO: add unset display, to unset we map to
+	# screen size and location ie 7680x2160+0+0 (2x3840)
 	def setDisplay(self):
 		index = int(self.config["monitor"]["monitor_index"])
-		cmd = "xsetwacom set {} MapToOutput {}".format(self.stylus_id, self.monitors[index])
+		cmd = self.cmd + f"MapToOutput {self.monitors[index]}"
 		debug(cmd)
 		run(cmd)
 
 	def switchDisplay(self, index=None):
-		if index == None:
+		if index == "unset":
+			cmd = self.cmd + f"MapToOutput {self.screen}"
+			debug(cmd)
+			run(cmd)
+			return
+		elif index == None:
 			index = int(self.config["monitor"]["monitor_index"])
 			index += 1
 			if index >= self.num_monitors:
 				index = 0
-		elif index >= self.num_monitors:
+		elif (index := int(index)) >= self.num_monitors:
 			index = self.num_monitors - 1
 
 		self.config["monitor"]["monitor_index"] = str(index)
 
 		self.setDisplay()
 
-		
 
 
 
-	def setStylusButtonDef(self, button, kdef):
+
+	def setStylusButtonDef(self, button: str):
+		kdef = self.config["stylus buttons"][button]
 		if button == "top":
 			button = 2
 		elif button == "mid":
@@ -208,24 +234,26 @@ class Device:
 		elif button == "bot":
 			button = 3
 
-		cmd = "xsetwacom set {} Button {} {}".format(self.stylus_id, button, kdef)
+		cmd = self.cmd + f"Button {button} {kdef}"
 		debug(cmd)
 		run(cmd)
 
-	def changeStylusButtonDef(self, button, kdef):
+	def changeStylusButtonDef(self, button: str, kdef: str):
 		self.config["stylus buttons"][button] = kdef
 		self.setStylusButtonDef(button)
 
 
 
-	def setPadButtonDef(self, button):
+	def setPadButtonDef(self, button: str):
 		if self.num_buttons > 0:
 			kdef = self.config["buttons"][button]
-			cmd = "xsetwacom set {} Button {} {}".format(self.pad_id, ord(button)-97, kdef)
+			cmd = f"xsetwacom set {self.pad_id} Button {ord(button)-97} {kdef}"
 			debug(cmd)
-			# run(cmd)
+			run(cmd)
+		else:
+			print("No pad buttons to map.")
 
-	def changePadButtonDef(self, button, kdef):
+	def changePadButtonDef(self, button: str, kdef: str):
 		if self.num_buttons > 0:
 			self.config["buttons"][button] = kdef
 			self.setPadButtonDef(button)
@@ -233,55 +261,49 @@ class Device:
 
 
 	def setAspect(self):
-		cmd = "xsetwacom get {} Area".format(self.stylus_id)
+		cmd = f"xsetwacom get {self.stylus_id} Area"
 		r = runc(cmd)
 		x1, y1, tablet_width, tablet_height = [ int(x) for x in extract(r)[0].split() ]
-		print(r)
-		screen_height = 1080
-		screen_width = 1920
+		# print(r)
+		screen_height = self.screen_height
+		screen_width = self.screen_width
 
 		if self.config["stylus"]["aspect_ratio"] == "height":
 			height = int(tablet_width * screen_height / screen_width)
-			cmd = f"xsetwacom set {self.stylus_id} Area 0 0 {tablet_width} {height}"
+			cmd = self.cmd + f"Area 0 0 {tablet_width} {height}"
 			debug(cmd)
 			run(cmd)
-
-			cmd = "xsetwacom get {} Area".format(self.stylus_id)
-			r = runc(cmd)
-			print(r)
-
 
 		elif self.config["stylus"]["aspect_ratio"] == "width":
 			width = int(screen_height * tablet_width / tablet_height)
-			cmd = f"xsetwacom set {self.stylus_id} MapToOutput {width}x{screen_height}+0+0"
+			cmd = self.cmd + f"MapToOutput {width}x{screen_height}+0+0"
 			debug(cmd)
-			run(cmd)
+			run(self.cmd)
 
 		elif self.config["stylus"]["aspect_ratio"] == "reset":
-			cmd = f"xsetwacom set {self.stylus_id} ResetArea"
+			cmd = self.cmd + f"ResetArea"
 			debug(cmd)
 			r = runc(cmd)
-			print(r)
 
 			index = int(self.config["monitor"]["monitor_index"])
-			cmd = "xsetwacom set {} MapToOutput {}".format(self.stylus_id, self.monitors[index])
+			cmd = self.cmd + f"MapToOutput {self.monitors[index]}"
 			debug(cmd)
 			run(cmd)
 
 
-	def changeAspect(self, typ):
-		self.config["stylus"]["aspect_ratio"] = typ
+	def changeAspect(self, ratio: str):
+		self.config["stylus"]["aspect_ratio"] = ratio
 		self.setAspect()
 
 
 
 	def setPressureCurve(self):
 		pc = self.config["stylus"]["pressure_curve"]
-		cmd = "xsetwacom set {} PressureCurve {}".format(self.stylus_id, pc)
+		cmd = f"xsetwacom set {self.stylus_id} PressureCurve {pc}"
 		debug(cmd)
 		run(cmd)
 
-	def changePressureCurve(self, curve):
+	def changePressureCurve(self, curve: str):
 		self.config["stylus"]["pressure_curve"] = pc
 		self.setPressureCurve()
 
@@ -292,25 +314,19 @@ class Device:
 		debug(cmd)
 		run(cmd)
 
-	def changeRotation(self, value):
+	def changeRotation(self, value: str):
 		self.config["stylus"]["rotation"] = value
 		self.setRotation()
 
 
-
-	def unTmp(self):
-		cmd = "cp {} {}/{}.conf".format(self.tmp_path, self.conf_path.parent, self.name)
-		debug(cmd)
-		run(cmd)
-
 	def defaultGen(self):
-		default = configparser.ConfigParser()
+		default = cfp.ConfigParser()
 		default["monitor"] = {
 			"monitor_index": 0
 		}
 
 		# Get default pressure curve using xsetwacom
-		cmd = "xsetwacom get {} PressureCurve ".format(self.stylus_id)
+		cmd = f"xsetwacom get {self.stylus_id} PressureCurve "
 		r = runc(cmd)
 		pc = extract(r)[0]
 
@@ -320,11 +336,11 @@ class Device:
 			"rotation": "none"
 		}
 
-		cmd = "xsetwacom get {} Button 2".format(self.stylus_id)
+		cmd = f"xsetwacom get {self.stylus_id} Button 2"
 		r = runc(cmd)
 		top = extract(r)[0][7:]
 
-		cmd = "xsetwacom get {} Button 3".format(self.stylus_id)
+		cmd = f"xsetwacom get {self.stylus_id} Button 3"
 		r = runc(cmd)
 		bot = extract(r)[0][7:]
 
@@ -347,7 +363,7 @@ class Device:
 		return default
 
 
-config_dir = Path().home() / ".config/wacom-config"
+config_dir = Path().home() / ".config/wacfig"
 
 cmd = "lsusb | grep -i wacom | awk '{print $6}'"
 r = runc(cmd)
@@ -355,12 +371,14 @@ devices_lsusb = extract(r)
 
 devices = []
 for dev in devices_lsusb:
-	cmd = "grep -rni \"{}\" /usr/share/libwacom/* | sed 's/:.*:.*//'".format(dev)
+	cmd = f"grep -rni \"{dev}\" /usr/share/libwacom/* | sed 's/:.*:.*//'"
 	r = runc(cmd)
 	filename = extract(r)
 
+	# debug(f"r: {r}\nfilename: {filename}")
+
 	d = Device(filename)
-	d.getIDs()
+	# d.getIDs()
 	devices.append(d)
 
 
@@ -379,9 +397,13 @@ if args.list:
 
 if args.device:
 	if args.device.isdigit():
-		device = devices[int(args.device)]
+		if (i := int(args.device)) >= (ld := len(devices)):
+			i = ld - 1
+		print(f"i = {i}")
+		device = devices[i]
 	else:
 		pass
+		print("not a number")  # neg numbers are not numbers?, presumably str
 		# Name, model num?
 else:
 	device = devices[0]
@@ -389,7 +411,7 @@ else:
 
 if args.setup:
 	if args.device:
-		device = int(args.device)
+		# device = devices[int(args.device)]
 		print(f"Device detected:  {device.pretty_str}")
 		device.setup()
 		device.saveTmp()
@@ -398,11 +420,10 @@ if args.setup:
 			print(f"Device detected:  {device.pretty_str}")
 			device.setup()
 			device.saveTmp()
-
 	exit()
 
 if args.button:
-	# If len(devices) > 1 require a flag or ask which one	
+	# TODO: If len(devices) > 1 require a flag or ask which one
 	device.readConfig()
 	for button, kdef in args.button:
 		if button == "top" or button == "bot":
@@ -410,11 +431,11 @@ if args.button:
 		elif button in devices[0].button_list:
 			device.changePadButtonDef(button, kdef)
 		else:
-			print("Button {} not recognised".format(button))
+			print(f"Button {button} not recognised")
 	device.saveTmp()
 
-	
-elif args.monitor == "None":	
+
+elif args.monitor == "None":
 	device.readConfig()
 	device.switchDisplay()
 	device.saveTmp()
@@ -422,7 +443,7 @@ elif args.monitor == "None":
 
 elif args.monitor:
 	device.readConfig()
-	device.switchDisplay(int(args.monitor))
+	device.switchDisplay(args.monitor)
 	device.saveTmp()
 
 if args.pressure_curve:
@@ -444,7 +465,7 @@ if args.rotate:
 	device.saveTmp()
 
 
-
-
 if args.save:
-	device.unTmp()
+	device.saveConfig()
+
+

@@ -1,0 +1,1 @@
+ACTION=="add", ATTRS{idVendor}=="056a", ATTRS{idProduct}=="0069", TAG+="systemd", SYMLINK="wacom-bamboo-ctf430", ENV{SYSTEMD_USER_WANTS}+="wacfig.service"

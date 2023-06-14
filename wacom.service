@@ -1,0 +1,12 @@
+
+[Unit]
+Description=Configure wacom tablets
+
+[Service]
+Type=oneshot
+ExecStart=/media/dev/git/local/wacfig -s
+#ExecStart=/usr/bin/wacfig -s
+
+[Install]
+WantedBy=default.target
+
