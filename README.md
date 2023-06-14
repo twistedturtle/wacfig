@@ -6,7 +6,7 @@ The command allows you to change the config temporarily, and to save it to a con
 
 To apply the configuration permanently, there's a systemd service file which is triggered at boot, and a udev rule file which triggers when you plug the device(s) in.
 
-
+I don't use this much and I haven't seen the code in a while. Hopefully it still works. I'll check it out properly soon, but in the mean time if you encounter any problems please open an issue.
 
 ### options:</br>
   #### -h, --help 
